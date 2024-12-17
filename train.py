@@ -430,7 +430,8 @@ if __name__ == "__main__":
             for field, value in zip(header, data):
                 tb_writer.add_scalar(field, value, num_frames)
 
-            curriculum.log_metrics(tb_writer, None, num_frames)
+            if args.syllabus:
+                curriculum.log_metrics(tb_writer, None, num_frames)
 
         # Save status
         if args.save_interval > 0 and update % args.save_interval == 0:
