@@ -1,41 +1,135 @@
 import argparse
-import time
 import datetime
-import torch_ac
-import tensorboardX
-import sys
-import numpy as np
 import importlib
+import sys
+import time
+
+import gym as openai_gym
+import gymnasium
+import numpy as np
+import tensorboardX
 import torch
-
+import torch_ac
+from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
+from syllabus.core import CleanRLEvaluator, GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator
+from syllabus.curricula import DomainRandomization, LearningProgress
 from torch_ac.utils import ParallelEnv
+
 import utils
-from utils import device
-from utils.prep_train import get_rdn_tsr
-from model import ACModel
+import wandb
+from envs import env_tr_uni
 from envs.env_utils import ach_to_string
+from envs.syllabus_wrapper import CrafterTaskWrapper
+from model import ACModel
+from utils import device, preprocess_images, preprocess_totensor
+from utils.prep_train import get_rdn_tsr
 
 
-def eval_all_tasks(acmodel, penv, num_eps=1):
-    given_counts = np.zeros(len(penv.envs[0].given_achievements))
-    follow_counts = np.zeros(len(penv.envs[0].follow_achievements))
-    agent = utils.Agent.model_init(penv.observation_space, acmodel, num_envs=len(penv.envs))
-    with torch.no_grad():
-        obss = penv.reset()
-        ep_counter = 0
-        while ep_counter < num_eps:
-            actions = agent.get_actions(obss)
-            obss, rewards, terminateds, truncateds, infos = penv.step(actions)
-            dones = tuple(a | b for a, b in zip(terminateds, truncateds))
-            for i, done in enumerate(dones):
-                if done:
-                    given_counts += list(infos[i]['given_achs'].values())
-                    follow_counts += list(infos[i]['follow_achs'].values())
-                    ep_counter += 1
-    acmodel.train()
-    follow_counts = np.concatenate((follow_counts, np.zeros(len(given_counts) - len(follow_counts))))
-    task_success_rates = np.divide(follow_counts, given_counts, out=np.zeros_like(follow_counts), where=given_counts!=0)
-    return task_success_rates
+def preprocessor(obss, device="cuda"):
+    prep_obss = dict()
+    for key in obss.keys():
+        if key == 'image':
+            prep_obss[key] = preprocess_images([obs for obs in obss['image']], device=device)
+        else:
+            prep_obss[key] = preprocess_totensor([obs for obs in obss[key]], device=device)
+    return torch_ac.DictList(prep_obss)
+
+
+class ACEvaluator(Evaluator):
+    def __init__(self, agent, *args, **kwargs):
+        super().__init__(agent, *args, **kwargs)
+
+    def _get_action(self, state, lstm_state=None, done=None):
+        self._check_inputs(lstm_state, done)
+        if self.agent.recurrent:
+            dist, _, lstm_state = self.agent(state, lstm_state * (1 - done).unsqueeze(1))
+        else:
+            dist, _ = self.agent(state)
+        action = dist.sample()
+        return action, lstm_state, {}
+
+    def _get_value(self, state, lstm_state=None, done=None):
+        self._check_inputs(lstm_state, done)
+        if self.agent.recurrent:
+            _, value, lstm_state = self.agent(state, lstm_state * (1 - done).unsqueeze(1))
+        else:
+            _, value = self.agent(state)
+        return value, lstm_state, {}
+
+    def _get_action_and_value(self, state, lstm_state=None, done=None):
+        self._check_inputs(lstm_state, done)
+        if self.agent.recurrent:
+            dist, value, lstm_state = self.agent(state, lstm_state * (1 - done).unsqueeze(1))
+        else:
+            dist, value = self.agent(state)
+        action = dist.sample()
+        return action, value, lstm_state, {}
+
+    def _check_inputs(self, lstm_state, done):
+        assert (
+            lstm_state is not None
+        ), "LSTM state must be provided. Make sure to configure any LSTM-specific settings for your curriculum."
+        assert (
+            done is not None
+        ), "Done must be provided. Make sure to configure any LSTM-specific settings for your curriculum."
+        return True
+
+    def _prepare_state(self, state):
+
+        if self.preprocess_obs is not None:
+            state = self.preprocess_obs(state)
+        return state
+
+    def _prepare_lstm(self, lstm_state, done):
+        lstm_state = torch.Tensor(lstm_state).to(self.device)
+        done = torch.Tensor(done).to(self.device)
+        return lstm_state, done
+
+    def _set_eval_mode(self):
+        self.agent.eval()
+
+    def _set_train_mode(self):
+        self.agent.train()
+
+
+def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
+    def thunk(eval_episodes=1):
+        given_counts = np.zeros(len(penv.envs[0].given_achievements))
+        follow_counts = np.zeros(len(penv.envs[0].follow_achievements))
+        agent = utils.Agent.model_init(penv.observation_space, acmodel, num_envs=len(penv.envs))
+        with torch.no_grad():
+            obss = penv.reset()
+            ep_counter = 0
+            while ep_counter < eval_episodes:
+                actions = agent.get_actions(obss)
+                obss, rewards, terminateds, truncateds, infos = penv.step(actions)
+                dones = tuple(a | b for a, b in zip(terminateds, truncateds))
+                for i, done in enumerate(dones):
+                    if done:
+                        print(f"Eval {ep_counter} done")
+                        given_counts += list(infos[i]['given_achs'].values())
+                        follow_counts += list(infos[i]['follow_achs'].values())
+                        ep_counter += 1
+        acmodel.train()
+        follow_counts = np.concatenate((follow_counts, np.zeros(len(given_counts) - len(follow_counts))))
+        task_success_rates = np.divide(follow_counts, given_counts,
+                                       out=np.zeros_like(follow_counts), where=given_counts != 0)
+        return task_success_rates
+    if wrap:
+        return thunk
+    return thunk(eval_episodes=num_eps)
+
+
+def make_env(curriculum=None, is_eval=False):
+    def thunk():
+        env = env_tr_uni.Env(length=200)
+        # env = GymV21CompatibilityV0(env=env)
+        env = CrafterTaskWrapper(env)
+
+        if not is_eval:
+            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components, buffer_size=2)
+        return env
+    return thunk
 
 
 if __name__ == "__main__":
@@ -46,6 +140,10 @@ if __name__ == "__main__":
                         help="algorithm to use: a2c | ppo")
     parser.add_argument("--env", default='custom',
                         help="name of the environment to train on")
+    parser.add_argument("--exp-name", default='testing',
+                        help="name of the experiment in wandb")
+    parser.add_argument("--logging-dir", default='.',
+                        help="directory to log wandb results")
     parser.add_argument("--model", default=None,
                         help="name of the model (default: {ENV}_{ALGO}_{TIME})")
     parser.add_argument("--seed", type=int, default=1,
@@ -98,8 +196,22 @@ if __name__ == "__main__":
                         help="parameter for reweighing learning progress (default: 0.1)")
     parser.add_argument("--eval-num", type=int, default=20,
                         help="number of times to evaluate each task for learning progress (default: 20)")
+    parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
     args = parser.parse_args()
     args.recurrence = 2
+
+    run_name = f"{args.env}__{args.exp_name}__{args.seed}__{int(time.time())}"
+
+    wandb.init(
+        project="syllabus-testing",
+        entity="ryansullivan",
+        sync_tensorboard=True,
+        config=vars(args),
+        name=run_name,
+        monitor_gym=True,
+        save_code=True,
+        dir=args.logging_dir
+    )
 
     # Set run dir
     date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
@@ -112,7 +224,10 @@ if __name__ == "__main__":
     txt_logger = utils.get_txt_logger(model_dir)
     # csv_file, csv_logger = utils.get_csv_logger(model_dir)
     tb_writer = tensorboardX.SummaryWriter(model_dir)
-
+    tb_writer.add_text(
+        "hyperparameters",
+        "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
+    )
     # Log command and all script arguments
     txt_logger.info("{}\n".format(" ".join(sys.argv)))
     txt_logger.info("{}\n".format(args))
@@ -122,19 +237,6 @@ if __name__ == "__main__":
 
     # Set device
     txt_logger.info(f"Device: {device}\n")
-
-    # Load environments
-    env_module = importlib.import_module(f'envs.env_{args.env}')
-    eval_envs = [env_module.Env() for _ in range(args.eval_procs)]
-    eval_envs = ParallelEnv(eval_envs)
-    eval_envs.reset()
-    eval_envs.set_curriculum(train=False)
-    eval_eps = args.eval_num * len(eval_envs.envs[0].target_achievements) * 300 / eval_envs.envs[0]._length
-    # eval_eps = 1  # for testing
-    envs = []
-    for i in range(args.procs):
-        envs.append(env_module.Env())
-    txt_logger.info("Environments loaded\n")
 
     # Load training status
     try:
@@ -146,17 +248,49 @@ if __name__ == "__main__":
         }
     txt_logger.info("Training status loaded\n")
 
+    sample_env = env_tr_uni.Env()
+    # sample_env = GymV21CompatibilityV0(env=sample_env)
+
     # Load observations preprocessor
-    obs_space, preprocess_obss = utils.get_obss_preprocessor(envs[0].observation_space)
+    obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
     txt_logger.info("Observations preprocessor loaded")
 
     # Load model
-    acmodel = ACModel(obs_space, envs[0].action_space, acsize=args.ac_size, activation=args.activation)
+    acmodel = ACModel(obs_space, sample_env.action_space,
+                      acsize=args.ac_size, activation=args.activation)
     if "model_state" in status:
         acmodel.load_state_dict(status["model_state"])
     acmodel.to(device)
     txt_logger.info("Model loaded\n")
     txt_logger.info("{}\n".format(acmodel))
+
+    # Eval envs
+    env_module = importlib.import_module(f'envs.env_{args.env}')
+    eval_envs = [env_tr_uni.Env() for _ in range(args.eval_procs)]
+    eval_envs = ParallelEnv(eval_envs)
+    eval_envs.reset()
+    eval_envs.set_curriculum(train=False)
+
+    # Create curriculum
+    if args.syllabus:
+        sample_env = CrafterTaskWrapper(sample_env)
+        evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
+        # eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
+        # curriculum = DomainRandomization(sample_env.task_space)
+        curriculum = LearningProgress(eval_envs, evaluator, sample_env.task_space, rnn_shape=(
+            args.eval_procs, acmodel.memory_size), eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True))
+        curriculum = make_multiprocessing_curriculum(curriculum)
+
+    # Load environments
+    eval_eps = args.eval_num * len(eval_envs.envs[0].target_achievements) * 300 / eval_envs.envs[0]._length
+    eval_eps = 1  # for testing
+    envs = []
+    for i in range(args.procs):
+        if args.syllabus:
+            envs.append(make_env(curriculum=curriculum)())
+        else:
+            envs.append(env_module.Env())
+    txt_logger.info("Environments loaded\n")
 
     # Load algo
     if args.algo == "a2c":
@@ -179,6 +313,7 @@ if __name__ == "__main__":
     update = status["update"]
     start_time = time.time()
     if args.eval_interval > 0:
+        print("Initial Evaluating")
         rdn_tsr = get_rdn_tsr(eval_envs.envs[0])
         # rdn_tsr = np.zeros(len(eval_envs.given_achievements))
         raw_tsr = status["raw_tsr"]
@@ -205,6 +340,7 @@ if __name__ == "__main__":
         header = [f'train_eval/{ach_to_string(ach)}-sr' for ach in envs[0].target_achievements]
         for field, value in zip(header, raw_tsr):
             tb_writer.add_scalar(field, value, num_frames)
+        print("Initial Evaluated")
 
     while num_frames < args.frames:
         # Update model parameters
@@ -225,6 +361,7 @@ if __name__ == "__main__":
 
         # Evaluate for learning progress
         if args.eval_interval > 0 and update % args.eval_interval == 0:
+            print("Evaluating")
             raw_tsr = eval_all_tasks(acmodel, eval_envs, num_eps=eval_eps)
             # normalize task success rates with random baseline rates
             norm_tsr = np.maximum(raw_tsr - rdn_tsr, np.zeros(raw_tsr.shape)) / (1.0 - rdn_tsr)
@@ -259,6 +396,7 @@ if __name__ == "__main__":
             for field, value in zip(header, task_sampled_rates):
                 tb_writer.add_scalar(field, value, num_frames)
             task_sampled_rates = np.zeros(len(eval_envs.envs[0].given_achievements))
+            print("Evaluated")
 
         # Print logs
         if update % args.log_interval == 0:
@@ -291,6 +429,8 @@ if __name__ == "__main__":
 
             for field, value in zip(header, data):
                 tb_writer.add_scalar(field, value, num_frames)
+
+            curriculum.log_metrics(tb_writer, None, num_frames)
 
         # Save status
         if args.save_interval > 0 and update % args.save_interval == 0:
