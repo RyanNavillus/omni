@@ -1,6 +1,7 @@
 import argparse
 import datetime
 import importlib
+import os
 import sys
 import time
 
@@ -97,6 +98,7 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
         given_counts = np.zeros(len(penv.envs[0].given_achievements))
         follow_counts = np.zeros(len(penv.envs[0].follow_achievements))
         agent = utils.Agent.model_init(penv.observation_space, acmodel, num_envs=len(penv.envs))
+        acmodel.eval()
         with torch.no_grad():
             obss = penv.reset()
             ep_counter = 0
@@ -122,8 +124,7 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
 
 def make_env(curriculum=None, is_eval=False):
     def thunk():
-        env = env_tr_uni.Env(length=200)
-        # env = GymV21CompatibilityV0(env=env)
+        env = env_tr_uni.Env()
         env = CrafterTaskWrapper(env)
 
         if not is_eval:
@@ -218,7 +219,7 @@ if __name__ == "__main__":
     default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}"
 
     model_name = args.model or default_model_name
-    model_dir = utils.get_model_dir(model_name)
+    model_dir = os.path.join(args.logging_dir, utils.get_model_dir(model_name))
 
     # Load loggers and Tensorboard writer
     txt_logger = utils.get_txt_logger(model_dir)
@@ -277,8 +278,11 @@ if __name__ == "__main__":
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
         # eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         # curriculum = DomainRandomization(sample_env.task_space)
+        names = [f'{ach_to_string(ach)}' for ach in sample_env.target_achievements]
+        def task_names(task, idx):
+            return names[idx]
         curriculum = LearningProgress(eval_envs, evaluator, sample_env.task_space, rnn_shape=(
-            args.eval_procs, acmodel.memory_size), eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True))
+            args.eval_procs, acmodel.memory_size), eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True), task_names=task_names)
         curriculum = make_multiprocessing_curriculum(curriculum)
 
     # Load environments
@@ -395,6 +399,10 @@ if __name__ == "__main__":
             header.append('train_sampled/dummy')  # all dummy tasks are the same, so keep track of one
             for field, value in zip(header, task_sampled_rates):
                 tb_writer.add_scalar(field, value, num_frames)
+            tb_writer.add_scalar("raw_tsr", np.mean(raw_tsr), num_frames)
+            tb_writer.add_scalar("ema_tsr", np.mean(ema_tsr), num_frames)
+            tb_writer.add_scalar("learning_progress", np.mean(learning_progress), num_frames)
+
             task_sampled_rates = np.zeros(len(eval_envs.envs[0].given_achievements))
             print("Evaluated")
 
@@ -429,9 +437,9 @@ if __name__ == "__main__":
 
             for field, value in zip(header, data):
                 tb_writer.add_scalar(field, value, num_frames)
-
+            
             if args.syllabus:
-                curriculum.log_metrics(tb_writer, None, num_frames)
+                curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=200)
 
         # Save status
         if args.save_interval > 0 and update % args.save_interval == 0:
