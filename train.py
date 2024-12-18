@@ -265,6 +265,9 @@ if __name__ == "__main__":
     txt_logger.info("Model loaded\n")
     txt_logger.info("{}\n".format(acmodel))
 
+    eval_eps = args.eval_num * len(sample_env.target_achievements) * 300 / sample_env._length
+    # eval_eps = 1  # for testing
+
     # Eval envs
     env_module = importlib.import_module(f'envs.env_{args.env}')
     eval_envs = [env_tr_uni.Env() for _ in range(args.eval_procs)]
@@ -290,13 +293,12 @@ if __name__ == "__main__":
             eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
             rnn_shape=(args.eval_procs, acmodel.memory_size),
             eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
-            task_names=task_names
-        )
+            task_names=task_names,
+            eval_eps=eval_eps,
+            baseline_eval_eps=eval_eps)
         curriculum = make_multiprocessing_curriculum(curriculum)
 
     # Load environments
-    eval_eps = args.eval_num * len(eval_envs.envs[0].target_achievements) * 300 / eval_envs.envs[0]._length
-    # eval_eps = 1  # for testing
     envs = []
     for i in range(args.procs):
         if args.syllabus:
