@@ -108,7 +108,6 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
                 dones = tuple(a | b for a, b in zip(terminateds, truncateds))
                 for i, done in enumerate(dones):
                     if done:
-                        print(f"Eval {ep_counter} done")
                         given_counts += list(infos[i]['given_achs'].values())
                         follow_counts += list(infos[i]['follow_achs'].values())
                         ep_counter += 1
@@ -116,6 +115,8 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
         follow_counts = np.concatenate((follow_counts, np.zeros(len(given_counts) - len(follow_counts))))
         task_success_rates = np.divide(follow_counts, given_counts,
                                        out=np.zeros_like(follow_counts), where=given_counts != 0)
+        print(np.min(task_success_rates),
+              np.mean(task_success_rates), np.max(task_success_rates))
         return task_success_rates
     if wrap:
         return thunk
@@ -250,7 +251,6 @@ if __name__ == "__main__":
     txt_logger.info("Training status loaded\n")
 
     sample_env = env_tr_uni.Env()
-    # sample_env = GymV21CompatibilityV0(env=sample_env)
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
@@ -275,19 +275,28 @@ if __name__ == "__main__":
     # Create curriculum
     if args.syllabus:
         sample_env = CrafterTaskWrapper(sample_env)
+        sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
         # eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         # curriculum = DomainRandomization(sample_env.task_space)
-        names = [f'{ach_to_string(ach)}' for ach in sample_env.target_achievements]
+        names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
+
         def task_names(task, idx):
             return names[idx]
-        curriculum = LearningProgress(eval_envs, evaluator, sample_env.task_space, rnn_shape=(
-            args.eval_procs, acmodel.memory_size), eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True), task_names=task_names)
+        curriculum = LearningProgress(
+            eval_envs,
+            evaluator,
+            sample_env.task_space,
+            eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+            rnn_shape=(args.eval_procs, acmodel.memory_size),
+            eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
+            task_names=task_names
+        )
         curriculum = make_multiprocessing_curriculum(curriculum)
 
     # Load environments
     eval_eps = args.eval_num * len(eval_envs.envs[0].target_achievements) * 300 / eval_envs.envs[0]._length
-    eval_eps = 1  # for testing
+    # eval_eps = 1  # for testing
     envs = []
     for i in range(args.procs):
         if args.syllabus:
@@ -437,9 +446,9 @@ if __name__ == "__main__":
 
             for field, value in zip(header, data):
                 tb_writer.add_scalar(field, value, num_frames)
-            
+
             if args.syllabus:
-                curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=200)
+                curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=5)
 
         # Save status
         if args.save_interval > 0 and update % args.save_interval == 0:
