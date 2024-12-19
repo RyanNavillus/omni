@@ -18,7 +18,7 @@ from torch_ac.utils import ParallelEnv
 
 import utils
 import wandb
-from envs import env_tr_uni
+from envs import env_tr_uni, env_tr_syllabus
 from envs.env_utils import ach_to_string
 from envs.syllabus_wrapper import CrafterTaskWrapper
 from model import ACModel
@@ -125,7 +125,7 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
 
 def make_env(curriculum=None, is_eval=False):
     def thunk():
-        env = env_tr_uni.Env()
+        env = env_tr_syllabus.Env()
         env = CrafterTaskWrapper(env)
 
         if not is_eval:
@@ -266,6 +266,7 @@ if __name__ == "__main__":
     txt_logger.info("{}\n".format(acmodel))
 
     eval_eps = args.eval_num * len(sample_env.target_achievements) * 300 / sample_env._length
+    print("Eval eps:", eval_eps)
     # eval_eps = 1  # for testing
 
     # Eval envs
