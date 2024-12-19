@@ -19,4 +19,4 @@ class CrafterTaskWrapper(TaskWrapper):
     def change_task(self, new_task):
         self.env.task_idx = new_task
         self.env.task_steps = 0
-        self.env.task_enc = self.env._encode_task(self.task_idx)
+        self.env.task_enc = self.env._encode_task(self.env.task_idx)

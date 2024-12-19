@@ -296,7 +296,7 @@ if __name__ == "__main__":
             task_names=task_names,
             eval_eps=eval_eps,
             baseline_eval_eps=eval_eps)
-        curriculum = make_multiprocessing_curriculum(curriculum)
+        curriculum = make_multiprocessing_curriculum(curriculum, timeout=1200)
 
     # Load environments
     envs = []
