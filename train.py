@@ -129,7 +129,8 @@ def make_env(curriculum=None, is_eval=False):
         env = CrafterTaskWrapper(env)
 
         if not is_eval:
-            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components, buffer_size=1)
+            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components,
+                                       buffer_size=1, change_task_on_completion=True)
         return env
     return thunk
 
