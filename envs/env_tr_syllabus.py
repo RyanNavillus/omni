@@ -75,9 +75,6 @@ class Env(env.Env):
         self.follow_achievements = {k: 0 for k in self.target_achievements}
         self.given_achievements = {k: 0 for k in self.target_achievements}
         self.given_achievements.update({f'dummy{i}': 0 for i in range(DUMMY_TASKS)})
-        # self._specify_task()
-        self.update_given_ach()
-        self.task_progress = 0
         return self._obs(), {}
 
     def update_given_ach(self):
@@ -153,7 +150,6 @@ class Env(env.Env):
             if count > 0 and name not in self._unlocked}
         self._unlocked |= unlocked
 
-        task_failed = True
         if self.task_idx < len(self.target_achievements):
             task_desc = self.target_achievements[self.task_idx]
             if self.isreptask[self.task_idx]:
@@ -162,29 +158,20 @@ class Env(env.Env):
                 subtask_desc = '_'.join(task_words[:-1])
                 if self._player.achievements[subtask_desc] - self.past_achievements[subtask_desc] > 0:
                     self.task_progress += 1.0 / float(task_words[-1])
-                if self.task_progress >= 1.0:
-                    reward += 1.0
-                    self.follow_achievements[task_desc] += 1
-                    self._specify_task()
-                    self.update_given_ach()
-                    self.task_progress = 0
-                    task_failed = False
             elif self._player.achievements[task_desc] - self.past_achievements[task_desc] > 0:
                 # agent successfully completed given task
+                self.task_progress = 1.0
+
+            # Select new task if current task is completed
+            if self.task_progress >= 1.0:
                 reward += 1.0
                 self.follow_achievements[task_desc] += 1
-                self._specify_task()
-                self.update_given_ach()
-                self.task_progress = 0
-                task_failed = False
 
-        if task_failed:
+        if self.task_progress < 1.0:
             # increase task step, check if agent is taking too long to complete given task
             self.task_steps += 1
             if self.task_steps > 300:
-                self._specify_task()
-                self.update_given_ach()
-                self.task_progress = 0
+                self.task_progress = -1.0
 
         self.past_achievements = self._player.achievements.copy()
         return reward
