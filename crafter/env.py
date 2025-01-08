@@ -139,7 +139,7 @@ class Env(BaseClass):
             return canvas.transpose((1, 0, 2))
 
     def _obs(self):
-        return self.render()
+        return self.render().astype(np.uint8)
 
     def _update_time(self):
         # https://www.desmos.com/calculator/grfbc6rs3h

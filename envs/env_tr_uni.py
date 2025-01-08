@@ -181,7 +181,7 @@ class Env(env.Env):
         if task_failed:
             # increase task step, check if agent is taking too long to complete given task
             self.task_steps += 1
-            if self.task_steps > 300:
+            if self.task_steps >= 300:
                 self._specify_task()
                 self.update_given_ach()
                 self.task_progress = 0
