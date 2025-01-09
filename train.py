@@ -12,8 +12,8 @@ import tensorboardX
 import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
-from syllabus.core import CleanRLEvaluator, GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator
-from syllabus.curricula import DomainRandomization, LearningProgress
+from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
+from syllabus.curricula import LearningProgress
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -106,11 +106,15 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
                 actions = agent.get_actions(obss)
                 obss, rewards, terminateds, truncateds, infos = penv.step(actions)
                 dones = tuple(a | b for a, b in zip(terminateds, truncateds))
+
                 for i, done in enumerate(dones):
                     if done:
                         given_counts += list(infos[i]['given_achs'].values())
                         follow_counts += list(infos[i]['follow_achs'].values())
                         ep_counter += 1
+                        if ep_counter % 100 == 0:
+                            print([f"{f}/{g}" for f, g in zip(follow_counts, given_counts)])
+
         acmodel.train()
         follow_counts = np.concatenate((follow_counts, np.zeros(len(given_counts) - len(follow_counts))))
         task_success_rates = np.divide(follow_counts, given_counts,
@@ -125,10 +129,13 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
 
 def make_env(curriculum=None, is_eval=False):
     def thunk():
-        env = env_tr_syllabus.Env()
+        env = env_tr_syllabus.Env(eval_mode=is_eval)
         env = CrafterTaskWrapper(env)
 
-        if not is_eval:
+        if is_eval:
+            env = GymnasiumEvaluationWrapper(env, change_task_on_completion=True,
+                                             eval_only_n_tasks=len(env.follow_achievements))
+        else:
             env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components,
                                        buffer_size=1, change_task_on_completion=True)
         return env
@@ -251,7 +258,7 @@ if __name__ == "__main__":
         }
     txt_logger.info("Training status loaded\n")
 
-    sample_env = env_tr_uni.Env()
+    sample_env = env_tr_syllabus.Env()
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
@@ -268,7 +275,6 @@ if __name__ == "__main__":
 
     eval_eps = args.eval_num * len(sample_env.target_achievements) * 300 / sample_env._length
     print("Eval eps:", eval_eps)
-    # eval_eps = 1  # for testing
 
     # Eval envs
     env_module = importlib.import_module(f'envs.env_{args.env}')
@@ -282,19 +288,19 @@ if __name__ == "__main__":
         sample_env = CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
-        # eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
-        # curriculum = DomainRandomization(sample_env.task_space)
+        syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
 
         def task_names(task, idx):
             return names[idx]
+
         curriculum = LearningProgress(
-            eval_envs,
-            evaluator,
             sample_env.task_space,
+            eval_envs=syllabus_eval_envs,
+            evaluator=evaluator,
+            # eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
             eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
             rnn_shape=(args.eval_procs, acmodel.memory_size),
-            eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
             task_names=task_names,
             eval_eps=eval_eps,
             baseline_eval_eps=eval_eps)

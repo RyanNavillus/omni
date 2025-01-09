@@ -30,18 +30,20 @@ class Env(env.Env):
 
     def __init__(
             self, area=(64, 64), view=(9, 9), size=(64, 64),
-            reward=True, length=1500, seed=None, **kwargs):
+            reward=True, length=1500, seed=None, eval_mode=False, **kwargs):
         super().__init__(area, view, size, reward, length, seed, **kwargs)
+        self.eval_mode = eval_mode
         counts = [10 if 'collect' in ach else 5 for ach in constants.achievements]
         self.target_achievements, self.isreptask = get_repeat_tasks(constants.achievements, counts=counts)
         self.task_progress = 0
         # task condition attributes
         self.task_idx = 0
-        self.task_enc = np.zeros(len(ENC_ORDER) + DUMMY_BITS)
+        self.task_enc = np.zeros(len(ENC_ORDER) + DUMMY_BITS, dtype=np.uint8)
         self.task_steps = 0
         self.past_achievements = None
-        self.follow_achievements = None
-        self.given_achievements = None
+        self.follow_achievements = {k: 0 for k in self.target_achievements}
+        self.given_achievements = {k: 0 for k in self.target_achievements}
+        self.given_achievements.update({f'dummy{i}': 0 for i in range(DUMMY_TASKS)})
         self._specify_task = self._specify_curri_task
         self.eval_tsr = np.zeros(len(self.target_achievements))  # evaluated task success rates
 
@@ -56,7 +58,7 @@ class Env(env.Env):
     def reset(self):
         inventory = None
         # inherit inventory 50% of the time
-        if self._specify_task != self._specify_eval_task and self._player and np.random.rand() < 0.5:
+        if not self.eval_mode and self._player and np.random.rand() < 0.5:
             inventory = self._player.inventory.copy()
 
         center = (self._world.area[0] // 2, self._world.area[1] // 2)
@@ -89,6 +91,9 @@ class Env(env.Env):
         # additional info
         info['given_achs'] = self.given_achievements.copy()
         info['follow_achs'] = self.follow_achievements.copy()
+        if done and self.task_progress < 1.0:
+            # task failed
+            self.task_progress = -1.0
         return obs, reward, done, other_done, info
 
     def _encode_task(self, task_idx):
@@ -116,20 +121,12 @@ class Env(env.Env):
 
     def _specify_curri_task(self):
         # choose random next task
-        self.task_idx = np.random.choice(np.arange(len(self.target_achievements) + DUMMY_TASKS), size=1)[0]
-        self.task_steps = 0
-        self.task_enc = self._encode_task(self.task_idx)
+        pass
 
     def _specify_eval_task(self):
         # choose next task
         # NOTE: no need to eval dummy tasks
-        self.task_idx = self.eval_task_seq[self.eval_id]
-        self.eval_id += 1
-        if self.eval_id >= len(self.target_achievements):
-            self.eval_id %= len(self.target_achievements)
-            np.random.shuffle(self.eval_task_seq)
-        self.task_steps = 0
-        self.task_enc = self._encode_task(self.task_idx)
+        pass
 
     def render(self, size=None, semantic=False, add_desc=False):
         canvas = super().render(size=size, semantic=semantic)
@@ -167,10 +164,10 @@ class Env(env.Env):
                 reward += 1.0
                 self.follow_achievements[task_desc] += 1
 
-        if self.task_progress < 1.0:
+        if self.task_progress < 1.0 - 0.00001:
             # increase task step, check if agent is taking too long to complete given task
             self.task_steps += 1
-            if self.task_steps > 300:
+            if self.task_steps >= 300:
                 self.task_progress = -1.0
 
         self.past_achievements = self._player.achievements.copy()
@@ -183,13 +180,7 @@ class Env(env.Env):
         }
 
     def set_curriculum(self, train=False):
-        if train:
-            self._specify_task = self._specify_curri_task
-        else:
-            self.eval_task_seq = np.arange(len(self.target_achievements))
-            np.random.shuffle(self.eval_task_seq)
-            self.eval_id = 0
-            self._specify_task = self._specify_eval_task
+        pass
 
     def push_info(self, info):
         self.eval_tsr = info['ema_tsr']
