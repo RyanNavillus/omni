@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress
+from syllabus.curricula import LearningProgress, OMNI
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -294,7 +294,8 @@ if __name__ == "__main__":
         def task_names(task, idx):
             return names[idx]
 
-        curriculum = LearningProgress(
+        # curriculum = LearningProgress(
+        curriculum = OMNI(
             sample_env.task_space,
             eval_envs=syllabus_eval_envs,
             evaluator=evaluator,

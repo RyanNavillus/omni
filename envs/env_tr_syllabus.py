@@ -30,7 +30,12 @@ class Env(env.Env):
 
     def __init__(
             self, area=(64, 64), view=(9, 9), size=(64, 64),
-            reward=True, length=1500, seed=None, eval_mode=False, **kwargs):
+            reward=True, length=1500, seed=None, eval_mode=False, dummy_bits=1, **kwargs):
+        # TODO: Remove Hack
+        global DUMMY_BITS, DUMMY_TASKS
+        DUMMY_BITS = dummy_bits
+        DUMMY_TASKS = np.power(2, dummy_bits) - 1
+
         super().__init__(area, view, size, reward, length, seed, **kwargs)
         self.eval_mode = eval_mode
         counts = [10 if 'collect' in ach else 5 for ach in constants.achievements]
