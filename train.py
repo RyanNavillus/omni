@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -207,6 +207,8 @@ if __name__ == "__main__":
     parser.add_argument("--eval-num", type=int, default=20,
                         help="number of times to evaluate each task for learning progress (default: 20)")
     parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
+    parser.add_argument("--curriculum-method", type=str, default="learning_progress",
+                        help="method to use for curriculum learning")
     args = parser.parse_args()
     args.recurrence = 2
 
@@ -288,23 +290,45 @@ if __name__ == "__main__":
         sample_env = CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
-        syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
+        syllabus_eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
 
         def task_names(task, idx):
             return names[idx]
 
         # curriculum = LearningProgress(
-        curriculum = OMNI(
-            sample_env.task_space,
-            eval_envs=syllabus_eval_envs,
-            evaluator=evaluator,
-            # eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
-            eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-            rnn_shape=(args.eval_procs, acmodel.memory_size),
-            task_names=task_names,
-            eval_eps=eval_eps,
-            baseline_eval_eps=eval_eps)
+        interestingness = interestingness_from_json('./moi_saved/preds_r.json')
+        if args.curriculum_method == "learning_progress":
+            curriculum = LearningProgress(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "stratified_learning_progress":
+            curriculum = StratifiedLearningProgress(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "omni":
+            curriculum = OMNI(
+                sample_env.task_space,
+                interestingness=interestingness,
+                eval_envs=syllabus_eval_envs,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        else:
+            raise ValueError("Invalid curriculum method")
         curriculum = make_multiprocessing_curriculum(curriculum, timeout=300)
 
     # Load environments

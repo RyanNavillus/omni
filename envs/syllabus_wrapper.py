@@ -1,12 +1,33 @@
 from syllabus.core import TaskWrapper
-from syllabus.task_space import DiscreteTaskSpace
+from syllabus.task_space import DiscreteTaskSpace, StratifiedDiscreteTaskSpace
 
 
 class CrafterTaskWrapper(TaskWrapper):
     def __init__(self, env):
         super().__init__(env)
         self.env = env
-        self.task_space = DiscreteTaskSpace(len(self.env.given_achievements))
+        # self.task_space = DiscreteTaskSpace(len(self.env.given_achievements), list(self.env.given_achievements.keys()))
+
+        strata = []
+        strata_idx = []
+        stratum = []
+        stratum_idx = []
+        for idx, task in enumerate(self.env.given_achievements.keys()):
+            if len(stratum) == 0:
+                stratum.append(task)
+                stratum_idx.append(idx)
+            else:
+                if task.startswith(stratum[0]):
+                    stratum.append(task)
+                    stratum_idx.append(idx)
+                else:
+                    strata.append(stratum)
+                    strata_idx.append(stratum_idx)
+                    stratum = [task]
+                    stratum_idx = [idx]
+
+        self.task_space = StratifiedDiscreteTaskSpace(strata_idx, strata)
+        self.task = self.task_space.decode(self.env.task_idx)
 
     def reset(self, *args, **kwargs):
         new_task = kwargs.pop("new_task", None)
@@ -18,7 +39,7 @@ class CrafterTaskWrapper(TaskWrapper):
         elif options is not None:
             self.change_task(options)
         else:
-            self.change_task(self.env.task_idx)
+            self.change_task(self.task)
         obs["task_enc"] = self.env.task_enc
         info["task_completion"] = self.env.task_progress
         info["task"] = self.env.task_idx
@@ -26,6 +47,8 @@ class CrafterTaskWrapper(TaskWrapper):
 
     def change_task(self, new_task):
         self.task = new_task
+        if isinstance(new_task, str):
+            new_task = self.task_space.encode(new_task)
         self.env.task_idx = new_task
         self.env.task_steps = 0
         self.env.task_enc = self.env._encode_task(self.env.task_idx)
