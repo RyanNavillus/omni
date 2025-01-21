@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -166,7 +166,7 @@ if __name__ == "__main__":
                         help="number of updates between two evals (default: 25, 0 means no evaluating)")
     parser.add_argument("--procs", type=int, default=32,
                         help="number of processes (default: 32)")
-    parser.add_argument("--frames", type=int, default=10**7,
+    parser.add_argument("--frames", type=int, default=10**8,
                         help="number of frames of training (default: 1e7)")
     # Parameters for main algorithm
     parser.add_argument("--epochs", type=int, default=4,
@@ -290,7 +290,7 @@ if __name__ == "__main__":
         sample_env = CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
-        syllabus_eval_envs = SyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
+        syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
 
         def task_names(task, idx):
@@ -327,9 +327,19 @@ if __name__ == "__main__":
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "learnability":
+            curriculum = Learnability(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
         else:
             raise ValueError("Invalid curriculum method")
-        curriculum = make_multiprocessing_curriculum(curriculum, timeout=300)
+        curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
 
     # Load environments
     envs = []
