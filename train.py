@@ -312,6 +312,7 @@ if __name__ == "__main__":
             curriculum = StratifiedLearningProgress(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
                 rnn_shape=(args.eval_procs, acmodel.memory_size),
                 task_names=task_names,
@@ -322,6 +323,7 @@ if __name__ == "__main__":
                 sample_env.task_space,
                 interestingness=interestingness,
                 eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
                 rnn_shape=(args.eval_procs, acmodel.memory_size),
                 task_names=task_names,
