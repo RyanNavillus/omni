@@ -166,7 +166,7 @@ if __name__ == "__main__":
                         help="number of updates between two evals (default: 25, 0 means no evaluating)")
     parser.add_argument("--procs", type=int, default=32,
                         help="number of processes (default: 32)")
-    parser.add_argument("--frames", type=int, default=10**8,
+    parser.add_argument("--frames", type=int, default=10**7,
                         help="number of frames of training (default: 1e7)")
     # Parameters for main algorithm
     parser.add_argument("--epochs", type=int, default=4,
@@ -260,7 +260,7 @@ if __name__ == "__main__":
         }
     txt_logger.info("Training status loaded\n")
 
-    sample_env = env_tr_syllabus.Env()
+    sample_env = env_tr_uni.Env()
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
