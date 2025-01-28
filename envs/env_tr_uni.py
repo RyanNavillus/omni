@@ -135,7 +135,9 @@ class Env(env.Env):
         self.eval_id += 1
         if self.eval_id >= len(self.target_achievements):
             self.eval_id %= len(self.target_achievements)
-            np.random.shuffle(self.eval_task_seq)
+            rng = np.random.default_rng()
+            rng.shuffle(self.eval_task_seq)
+            # np.random.shuffle(self.eval_task_seq)
         self.task_steps = 0
         self.task_enc = self._encode_task(self.task_idx)
 
