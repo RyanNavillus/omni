@@ -207,7 +207,9 @@ class Env(env.Env):
             self._specify_task = self._specify_curri_task
         else:
             self.eval_task_seq = np.arange(len(self.target_achievements))
-            np.random.shuffle(self.eval_task_seq)
+            rng = np.random.default_rng()
+            rng.shuffle(self.eval_task_seq)
+            # np.random.shuffle(self.eval_task_seq)
             self.eval_id = 0
             self._specify_task = self._specify_eval_task
 
