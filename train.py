@@ -26,7 +26,7 @@ from utils import device, preprocess_images, preprocess_totensor
 from utils.prep_train import get_rdn_tsr
 
 
-def preprocessor(obss, device="cuda"):
+def preprocessor(obss, device=device):
     prep_obss = dict()
     for key in obss.keys():
         if key == 'image':
@@ -339,7 +339,8 @@ if __name__ == "__main__":
                 rnn_shape=(args.eval_procs, acmodel.memory_size),
                 task_names=task_names,
                 eval_eps=eval_eps,
-                baseline_eval_eps=eval_eps)
+                baseline_eval_eps=eval_eps,
+                sampling="dist")
         else:
             raise ValueError("Invalid curriculum method")
         curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
