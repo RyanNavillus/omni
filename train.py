@@ -287,6 +287,7 @@ if __name__ == "__main__":
 
     # Create curriculum
     if args.syllabus:
+        sample_env = env_tr_syllabus.Env()
         sample_env = CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
