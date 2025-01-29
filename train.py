@@ -374,7 +374,7 @@ if __name__ == "__main__":
     num_frames = status["num_frames"]
     update = status["update"]
     start_time = time.time()
-    if args.eval_interval > 0:
+    if args.eval_interval > 0 and not args.syllabus:
         print("Initial Evaluating")
         rdn_tsr = get_rdn_tsr(eval_envs.envs[0])
         # rdn_tsr = np.zeros(len(eval_envs.given_achievements))
@@ -416,13 +416,13 @@ if __name__ == "__main__":
         update += 1
 
         # Save relevant env info
-        if args.eval_interval > 0:
+        if args.eval_interval > 0 and not args.syllabus:
             done_envinfo = logs["done_envinfo"]
             for einfo in done_envinfo:
                 task_sampled_rates += list(einfo['given_achs'].values())
 
         # Evaluate for learning progress
-        if args.eval_interval > 0 and update % args.eval_interval == 0:
+        if args.eval_interval > 0 and update % args.eval_interval == 0 and not args.syllabus:
             print("Evaluating")
             raw_tsr = eval_all_tasks(acmodel, eval_envs, num_eps=eval_eps)
             # normalize task success rates with random baseline rates
@@ -500,7 +500,7 @@ if __name__ == "__main__":
                 curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=5)
 
         # Save status
-        if args.save_interval > 0 and update % args.save_interval == 0:
+        if args.save_interval > 0 and update % args.save_interval == 0 and not args.syllabus:
             status = {"num_frames": num_frames, "update": update,
                       "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
                       "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
@@ -512,8 +512,9 @@ if __name__ == "__main__":
                 txt_logger.info("Final status updated")
 
     # Save final checkpoint status
-    status = {"num_frames": num_frames, "update": update,
-              "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
-              "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
-    utils.save_status(status, model_dir)
-    txt_logger.info("Final status saved")
+    if not args.syllabus:
+        status = {"num_frames": num_frames, "update": update,
+                  "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
+                  "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
+        utils.save_status(status, model_dir)
+        txt_logger.info("Final status saved")
