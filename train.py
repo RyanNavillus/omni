@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -269,6 +269,8 @@ if __name__ == "__main__":
     # Load model
     acmodel = ACModel(obs_space, sample_env.action_space,
                       acsize=args.ac_size, activation=args.activation)
+    print(sum(p.numel() for p in acmodel.parameters() if p.requires_grad))
+
     if "model_state" in status:
         acmodel.load_state_dict(status["model_state"])
     acmodel.to(device)
@@ -333,6 +335,18 @@ if __name__ == "__main__":
         elif args.curriculum_method == "learnability":
             curriculum = Learnability(
                 sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                sampling="dist")
+        elif args.curriculum_method == "omni_learnability":
+            curriculum = OMNILearnability(
+                sample_env.task_space,
+                interestingness=interestingness,
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
