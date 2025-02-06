@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -197,6 +197,12 @@ if __name__ == "__main__":
                         help="actor-critic layer size (default: 128)")
     parser.add_argument("--activation", default='tanh',
                         help="activation to use: tanh | relu")
+
+    # Syllabus arguments
+    parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
+    parser.add_argument("--curriculum-method", type=str, default="learning_progress",
+                        help="method to use for curriculum learning")
+
     # Parameters for learning progress
     parser.add_argument("--eval-procs", type=int, default=20,
                         help="number of processes (default: 20)")
@@ -206,9 +212,12 @@ if __name__ == "__main__":
                         help="parameter for reweighing learning progress (default: 0.1)")
     parser.add_argument("--eval-num", type=int, default=20,
                         help="number of times to evaluate each task for learning progress (default: 20)")
-    parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
-    parser.add_argument("--curriculum-method", type=str, default="learning_progress",
-                        help="method to use for curriculum learning")
+
+    # PLR arguments
+    parser.add_argument("--plr-temperature", type=float, default=0.1,
+                        help="temperature for PLR sampling (default: 0.1)")
+    parser.add_argument("--plr-staleness-coef", type=float, default=0.1,
+                        help="staleness coefficient for PLR sampling (default: 0.1)")
     args = parser.parse_args()
     args.recurrence = 2
 
@@ -367,6 +376,17 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 sampling="dist")
+        elif args.curriculum_method == "plr":
+            curriculum = CentralPrioritizedLevelReplay(
+                sample_env.task_space,
+                num_steps=args.frames_per_proc,
+                num_processes=args.procs,
+                gamma=args.discount,
+                gae_lambda=args.gae_lambda,
+                task_sampler_kwargs_dict={"strategy": "value_l1",
+                                          "staleness_coef": args.plr_staleness_coef,
+                                          "temperature": args.plr_temperature},
+            )
         else:
             raise ValueError("Invalid curriculum method")
         curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
@@ -388,7 +408,7 @@ if __name__ == "__main__":
     elif args.algo == "ppo":
         algo = torch_ac.PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                                 args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
+                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum)
     else:
         raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -400,7 +420,9 @@ if __name__ == "__main__":
     num_frames = status["num_frames"]
     update = status["update"]
     start_time = time.time()
-    if args.eval_interval > 0 and not args.syllabus:
+    should_eval = not args.syllabus or (args.syllabus and args.curriculum_method == "plr")
+    print(should_eval)
+    if args.eval_interval > 0 and should_eval:
         print("Initial Evaluating")
         rdn_tsr = get_rdn_tsr(eval_envs.envs[0])
         # rdn_tsr = np.zeros(len(eval_envs.given_achievements))
@@ -442,13 +464,13 @@ if __name__ == "__main__":
         update += 1
 
         # Save relevant env info
-        if args.eval_interval > 0 and not args.syllabus:
+        if args.eval_interval > 0 and should_eval:
             done_envinfo = logs["done_envinfo"]
             for einfo in done_envinfo:
                 task_sampled_rates += list(einfo['given_achs'].values())
 
         # Evaluate for learning progress
-        if args.eval_interval > 0 and update % args.eval_interval == 0 and not args.syllabus:
+        if args.eval_interval > 0 and update % args.eval_interval == 0 and should_eval:
             print("Evaluating")
             raw_tsr = eval_all_tasks(acmodel, eval_envs, num_eps=eval_eps)
             # normalize task success rates with random baseline rates
