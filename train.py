@@ -213,6 +213,12 @@ if __name__ == "__main__":
     parser.add_argument("--eval-num", type=int, default=20,
                         help="number of times to evaluate each task for learning progress (default: 20)")
 
+    # Learnability arguments
+    parser.add_argument("--learnability-prob", type=float, default=1.0,
+                        help="probability of sampling from the learnability curriculum (default: 1.0)")
+    parser.add_argument("--learnability-topk", type=int, default=10,
+                        help="number of top k tasks to select for sampling")
+
     # PLR arguments
     parser.add_argument("--plr-temperature", type=float, default=0.1,
                         help="temperature for PLR sampling (default: 0.1)")
@@ -352,7 +358,7 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 sampling="dist")
-        elif args.curriculum_method == "learnability_top10":
+        elif args.curriculum_method == "learnability_topk":
             curriculum = Learnability(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
@@ -363,7 +369,8 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 sampling="topk",
-                k_tasks=10)
+                k_tasks=args.learnability_topk,
+                learnable_prob=args.learnability_prob)
         elif args.curriculum_method == "omni_learnability":
             curriculum = OMNILearnability(
                 sample_env.task_space,
