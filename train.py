@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay
 from torch_ac.utils import ParallelEnv
 
 import utils
@@ -26,7 +26,7 @@ from utils import device, preprocess_images, preprocess_totensor
 from utils.prep_train import get_rdn_tsr
 
 
-def preprocessor(obss, device="cuda"):
+def preprocessor(obss, device=device):
     prep_obss = dict()
     for key in obss.keys():
         if key == 'image':
@@ -197,6 +197,12 @@ if __name__ == "__main__":
                         help="actor-critic layer size (default: 128)")
     parser.add_argument("--activation", default='tanh',
                         help="activation to use: tanh | relu")
+
+    # Syllabus arguments
+    parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
+    parser.add_argument("--curriculum-method", type=str, default="learning_progress",
+                        help="method to use for curriculum learning")
+
     # Parameters for learning progress
     parser.add_argument("--eval-procs", type=int, default=20,
                         help="number of processes (default: 20)")
@@ -206,7 +212,18 @@ if __name__ == "__main__":
                         help="parameter for reweighing learning progress (default: 0.1)")
     parser.add_argument("--eval-num", type=int, default=20,
                         help="number of times to evaluate each task for learning progress (default: 20)")
-    parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
+
+    # Learnability arguments
+    parser.add_argument("--learnability-prob", type=float, default=1.0,
+                        help="probability of sampling from the learnability curriculum (default: 1.0)")
+    parser.add_argument("--learnability-topk", type=int, default=10,
+                        help="number of top k tasks to select for sampling")
+
+    # PLR arguments
+    parser.add_argument("--plr-temperature", type=float, default=0.1,
+                        help="temperature for PLR sampling (default: 0.1)")
+    parser.add_argument("--plr-staleness-coef", type=float, default=0.1,
+                        help="staleness coefficient for PLR sampling (default: 0.1)")
     args = parser.parse_args()
     args.recurrence = 2
 
@@ -258,7 +275,7 @@ if __name__ == "__main__":
         }
     txt_logger.info("Training status loaded\n")
 
-    sample_env = env_tr_syllabus.Env()
+    sample_env = env_tr_uni.Env()
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
@@ -267,6 +284,8 @@ if __name__ == "__main__":
     # Load model
     acmodel = ACModel(obs_space, sample_env.action_space,
                       acsize=args.ac_size, activation=args.activation)
+    print(sum(p.numel() for p in acmodel.parameters() if p.requires_grad))
+
     if "model_state" in status:
         acmodel.load_state_dict(status["model_state"])
     acmodel.to(device)
@@ -285,6 +304,7 @@ if __name__ == "__main__":
 
     # Create curriculum
     if args.syllabus:
+        sample_env = env_tr_syllabus.Env()
         sample_env = CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
@@ -294,17 +314,89 @@ if __name__ == "__main__":
         def task_names(task, idx):
             return names[idx]
 
-        curriculum = LearningProgress(
-            sample_env.task_space,
-            eval_envs=syllabus_eval_envs,
-            evaluator=evaluator,
-            # eval_fn=eval_all_tasks(acmodel, eval_envs, wrap=True),
-            eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-            rnn_shape=(args.eval_procs, acmodel.memory_size),
-            task_names=task_names,
-            eval_eps=eval_eps,
-            baseline_eval_eps=eval_eps)
-        curriculum = make_multiprocessing_curriculum(curriculum, timeout=1200)
+        # curriculum = LearningProgress(
+        interestingness = interestingness_from_json('./moi_saved/preds_r.json')
+        if args.curriculum_method == "learning_progress":
+            curriculum = LearningProgress(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "stratified_learning_progress":
+            curriculum = StratifiedLearningProgress(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "omni":
+            curriculum = OMNI(
+                sample_env.task_space,
+                interestingness=interestingness,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "learnability":
+            curriculum = Learnability(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                sampling="dist")
+        elif args.curriculum_method == "learnability_topk":
+            curriculum = Learnability(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                sampling="topk",
+                k_tasks=args.learnability_topk,
+                learnable_prob=args.learnability_prob)
+        elif args.curriculum_method == "omni_learnability":
+            curriculum = OMNILearnability(
+                sample_env.task_space,
+                interestingness=interestingness,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                sampling="dist")
+        elif args.curriculum_method == "plr":
+            curriculum = CentralPrioritizedLevelReplay(
+                sample_env.task_space,
+                num_steps=args.frames_per_proc,
+                num_processes=args.procs,
+                gamma=args.discount,
+                gae_lambda=args.gae_lambda,
+                task_sampler_kwargs_dict={"strategy": "value_l1",
+                                          "staleness_coef": args.plr_staleness_coef,
+                                          "temperature": args.plr_temperature},
+            )
+        else:
+            raise ValueError("Invalid curriculum method")
+        curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
 
     # Load environments
     envs = []
@@ -323,7 +415,7 @@ if __name__ == "__main__":
     elif args.algo == "ppo":
         algo = torch_ac.PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                                 args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss)
+                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum)
     else:
         raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
@@ -335,7 +427,9 @@ if __name__ == "__main__":
     num_frames = status["num_frames"]
     update = status["update"]
     start_time = time.time()
-    if args.eval_interval > 0:
+    should_eval = not args.syllabus or (args.syllabus and args.curriculum_method == "plr")
+    print(should_eval)
+    if args.eval_interval > 0 and should_eval:
         print("Initial Evaluating")
         rdn_tsr = get_rdn_tsr(eval_envs.envs[0])
         # rdn_tsr = np.zeros(len(eval_envs.given_achievements))
@@ -377,13 +471,13 @@ if __name__ == "__main__":
         update += 1
 
         # Save relevant env info
-        if args.eval_interval > 0:
+        if args.eval_interval > 0 and should_eval:
             done_envinfo = logs["done_envinfo"]
             for einfo in done_envinfo:
                 task_sampled_rates += list(einfo['given_achs'].values())
 
         # Evaluate for learning progress
-        if args.eval_interval > 0 and update % args.eval_interval == 0:
+        if args.eval_interval > 0 and update % args.eval_interval == 0 and should_eval:
             print("Evaluating")
             raw_tsr = eval_all_tasks(acmodel, eval_envs, num_eps=eval_eps)
             # normalize task success rates with random baseline rates
@@ -461,7 +555,7 @@ if __name__ == "__main__":
                 curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=5)
 
         # Save status
-        if args.save_interval > 0 and update % args.save_interval == 0:
+        if args.save_interval > 0 and update % args.save_interval == 0 and not args.syllabus:
             status = {"num_frames": num_frames, "update": update,
                       "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
                       "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
@@ -473,8 +567,9 @@ if __name__ == "__main__":
                 txt_logger.info("Final status updated")
 
     # Save final checkpoint status
-    status = {"num_frames": num_frames, "update": update,
-              "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
-              "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
-    utils.save_status(status, model_dir)
-    txt_logger.info("Final status saved")
+    if not args.syllabus:
+        status = {"num_frames": num_frames, "update": update,
+                  "p_fast": p_fast, "p_slow": p_slow, "raw_tsr": raw_tsr, "ema_tsr": ema_tsr,
+                  "model_state": acmodel.state_dict(), "optimizer_state": algo.optimizer.state_dict()}
+        utils.save_status(status, model_dir)
+        txt_logger.info("Final status saved")

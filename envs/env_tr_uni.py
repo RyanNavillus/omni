@@ -30,14 +30,19 @@ class Env(env.Env):
 
     def __init__(
             self, area=(64, 64), view=(9, 9), size=(64, 64),
-            reward=True, length=1500, seed=None, **kwargs):
+            reward=True, length=1500, seed=None, dummy_bits=10, **kwargs):
+        # TODO: Remove Hack
+        global DUMMY_BITS, DUMMY_TASKS
+        DUMMY_BITS = dummy_bits
+        DUMMY_TASKS = np.power(2, dummy_bits) - 1
+
         super().__init__(area, view, size, reward, length, seed, **kwargs)
         counts = [10 if 'collect' in ach else 5 for ach in constants.achievements]
         self.target_achievements, self.isreptask = get_repeat_tasks(constants.achievements, counts=counts)
         self.task_progress = 0
         # task condition attributes
         self.task_idx = 0
-        self.task_enc = np.zeros(len(ENC_ORDER) + DUMMY_BITS)
+        self.task_enc = np.zeros(len(ENC_ORDER) + DUMMY_BITS, dtype=np.uint8)
         self.task_steps = 0
         self.past_achievements = None
         self.follow_achievements = None
@@ -50,7 +55,7 @@ class Env(env.Env):
         img_shape = (self._size[1], self._size[0], 3)
         return DictSpace({
             'image': BoxSpace(0, 255, img_shape, np.uint8),
-            'task_enc': BoxSpace(0, 1, (len(ENC_ORDER) + DUMMY_BITS, ), np.uint8),
+            'task_enc': BoxSpace(0, 1, (len(ENC_ORDER) + DUMMY_BITS,), np.uint8),
         })
 
     def reset(self):
@@ -130,7 +135,9 @@ class Env(env.Env):
         self.eval_id += 1
         if self.eval_id >= len(self.target_achievements):
             self.eval_id %= len(self.target_achievements)
-            np.random.shuffle(self.eval_task_seq)
+            rng = np.random.default_rng()
+            rng.shuffle(self.eval_task_seq)
+            # np.random.shuffle(self.eval_task_seq)
         self.task_steps = 0
         self.task_enc = self._encode_task(self.task_idx)
 
@@ -200,7 +207,9 @@ class Env(env.Env):
             self._specify_task = self._specify_curri_task
         else:
             self.eval_task_seq = np.arange(len(self.target_achievements))
-            np.random.shuffle(self.eval_task_seq)
+            rng = np.random.default_rng()
+            rng.shuffle(self.eval_task_seq)
+            # np.random.shuffle(self.eval_task_seq)
             self.eval_id = 0
             self._specify_task = self._specify_eval_task
 
