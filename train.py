@@ -322,10 +322,13 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
-                baseline_eval_eps=eval_eps)
+                baseline_eval_eps=eval_eps,
+                ema_alpha=args.ema_alpha,
+                p_theta=args.p_theta)
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
                 sample_env.task_space,
@@ -343,7 +346,8 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
@@ -353,7 +357,8 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
@@ -365,6 +370,8 @@ if __name__ == "__main__":
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
                 rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
@@ -378,7 +385,8 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
@@ -415,7 +423,7 @@ if __name__ == "__main__":
     elif args.algo == "ppo":
         algo = torch_ac.PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                                 args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum)
+                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum if isinstance(curriculum, CentralPrioritizedLevelReplay) else None)
     else:
         raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
