@@ -335,7 +335,8 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
@@ -346,8 +347,7 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                recurrent_size=acmodel.memory_size,
-                recurrent_method="rnn",
+
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
@@ -369,7 +369,6 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                rnn_shape=(args.eval_procs, acmodel.memory_size),
                 recurrent_size=acmodel.memory_size,
                 recurrent_method="rnn",
                 task_names=task_names,
