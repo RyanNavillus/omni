@@ -375,7 +375,7 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 sampling="topk",
-                k_tasks=args.learnability_topk,
+                topk=args.learnability_topk,
                 learnable_prob=args.learnability_prob)
         elif args.curriculum_method == "omni_learnability":
             curriculum = OMNILearnability(
