@@ -1,5 +1,7 @@
+import numpy as np
 from syllabus.core import TaskWrapper
 from syllabus.task_space import DiscreteTaskSpace, StratifiedDiscreteTaskSpace
+from crafter import objects, worldgen
 
 
 class CrafterTaskWrapper(TaskWrapper):
@@ -59,5 +61,46 @@ class CrafterTaskWrapper(TaskWrapper):
         obs, reward, term, trunc, info = self.env.step(action)
         info["task_completion"] = self.env.task_progress
         info["task"] = self.env.task_idx
+
+        return obs, reward, term, trunc, info
+
+
+class CrafterSeedWrapper(TaskWrapper):
+    def __init__(self, env):
+        super().__init__(env)
+        self.env = env
+        self.task_space = DiscreteTaskSpace(100)
+        self.task = self.env._seed
+        self.assigned_tasks = 0
+        self.episode_return = 0
+
+    def reset(self, *args, **kwargs):
+        self.assigned_tasks = 0
+        self.episode_return = 0
+
+        new_task = kwargs.pop("new_task", None)
+        options = kwargs.pop("options", None)
+
+        if new_task is not None:
+            self.change_task(new_task)
+        elif options is not None:
+            self.change_task(options)
+        else:
+            self.change_task(self.env._seed)
+        obs, info = self.env.reset()
+        obs["task_enc"] = self.env.task_enc
+        info["task_completion"] = self.env.task_progress
+        info["task"] = self.task
+        return obs, info
+
+    def change_task(self, new_task):
+        self.task = new_task
+        self.env.seed(self.task)
+
+    def step(self, action):
+        obs, reward, term, trunc, info = self.env.step(action)
+        self.episode_return += reward
+        info["task_completion"] = self.env.task_progress
+        info["task"] = self.task
 
         return obs, reward, term, trunc, info

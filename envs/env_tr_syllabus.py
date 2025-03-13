@@ -127,6 +127,9 @@ class Env(env.Env):
     def _specify_curri_task(self):
         # choose random next task
         pass
+        # self.task_idx = np.random.choice(np.arange(len(self.target_achievements) + DUMMY_TASKS), size=1)[0]
+        # self.task_steps = 0
+        # self.task_enc = self._encode_task(self.task_idx)
 
     def _specify_eval_task(self):
         # choose next task

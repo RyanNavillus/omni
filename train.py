@@ -14,13 +14,14 @@ import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
 from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay
+from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
 import utils
 import wandb
-from envs import env_tr_uni, env_tr_syllabus
+from envs import env_tr_uni, env_tr_syllabus, env_tr_syllabus_seed
 from envs.env_utils import ach_to_string
-from envs.syllabus_wrapper import CrafterTaskWrapper
+from envs.syllabus_wrapper import CrafterTaskWrapper, CrafterSeedWrapper
 from model import ACModel
 from utils import device, preprocess_images, preprocess_totensor
 from utils.prep_train import get_rdn_tsr
@@ -127,7 +128,7 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
     return thunk(eval_episodes=num_eps)
 
 
-def make_env(curriculum=None, is_eval=False):
+def make_task_env(curriculum=None, is_eval=False):
     def thunk():
         env = env_tr_syllabus.Env(eval_mode=is_eval)
         env = CrafterTaskWrapper(env)
@@ -138,6 +139,19 @@ def make_env(curriculum=None, is_eval=False):
         else:
             env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components,
                                        buffer_size=1, change_task_on_completion=True)
+        return env
+    return thunk
+
+
+def make_seed_env(curriculum=None, is_eval=False):
+    def thunk():
+        env = env_tr_syllabus_seed.Env(static_task=args.static_task)
+        env = CrafterSeedWrapper(env)
+
+        if is_eval:
+            env = GymnasiumEvaluationWrapper(env, ignore_seed=True)
+        else:
+            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components, buffer_size=2)
         return env
     return thunk
 
@@ -202,6 +216,12 @@ if __name__ == "__main__":
     parser.add_argument("--syllabus", type=bool, default=False, help="use curriculum learning")
     parser.add_argument("--curriculum-method", type=str, default="learning_progress",
                         help="method to use for curriculum learning")
+    parser.add_argument("--seed-curriculum", type=bool, default=False, help="use seed curriculum")
+    parser.add_argument("--static-task", type=str, default="make_wood_pickaxe", help="static task for seed curriculum")
+    parser.add_argument("--eval-num", type=int, default=20,
+                        help="number of times to evaluate each task for learning progress (default: 20)")
+    parser.add_argument("--eval-override", type=int, default=0,
+                        help="number of episodes to evaluate each task (default: 0)")
 
     # Parameters for learning progress
     parser.add_argument("--eval-procs", type=int, default=20,
@@ -210,8 +230,6 @@ if __name__ == "__main__":
                         help="smoothing value for ema in claculating learning progress (default: 0.1)")
     parser.add_argument("--p-theta", type=float, default=0.1,
                         help="parameter for reweighing learning progress (default: 0.1)")
-    parser.add_argument("--eval-num", type=int, default=20,
-                        help="number of times to evaluate each task for learning progress (default: 20)")
 
     # Learnability arguments
     parser.add_argument("--learnability-prob", type=float, default=1.0,
@@ -276,6 +294,8 @@ if __name__ == "__main__":
     txt_logger.info("Training status loaded\n")
 
     sample_env = env_tr_uni.Env()
+    sample_env.reset()
+    task_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
@@ -292,7 +312,10 @@ if __name__ == "__main__":
     txt_logger.info("Model loaded\n")
     txt_logger.info("{}\n".format(acmodel))
 
-    eval_eps = args.eval_num * len(sample_env.target_achievements) * 300 / sample_env._length
+    eval_eps = args.eval_num * \
+        (task_env.task_space.num_tasks if args.seed_curriculum else len(
+            sample_env.target_achievements) * 300 / sample_env._length)
+    eval_eps = args.eval_override if args.eval_override != 0 else eval_eps
     print("Eval eps:", eval_eps)
 
     # Eval envs
@@ -301,11 +324,12 @@ if __name__ == "__main__":
     eval_envs = ParallelEnv(eval_envs)
     eval_envs.reset()
     eval_envs.set_curriculum(train=False)
+    make_env = make_seed_env if args.seed_curriculum else make_task_env
 
     # Create curriculum
     if args.syllabus:
-        sample_env = env_tr_syllabus.Env()
-        sample_env = CrafterTaskWrapper(sample_env)
+        sample_env = env_tr_syllabus_seed.Env() if args.seed_curriculum else env_tr_syllabus.Env()
+        sample_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
         syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
@@ -317,6 +341,8 @@ if __name__ == "__main__":
         # curriculum = LearningProgress(
         interestingness = interestingness_from_json('./moi_saved/preds_r.json')
         if args.curriculum_method == "learning_progress":
+            evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
+            syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(32)])
             curriculum = LearningProgress(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
@@ -328,7 +354,10 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 ema_alpha=args.ema_alpha,
-                p_theta=args.p_theta)
+                p_theta=args.p_theta
+            )
+            curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
+
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
                 sample_env.task_space,
