@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability
 from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
@@ -341,8 +341,6 @@ if __name__ == "__main__":
         # curriculum = LearningProgress(
         interestingness = interestingness_from_json('./moi_saved/preds_r.json')
         if args.curriculum_method == "learning_progress":
-            evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
-            syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(32)])
             curriculum = LearningProgress(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
@@ -356,8 +354,6 @@ if __name__ == "__main__":
                 ema_alpha=args.ema_alpha,
                 p_theta=args.p_theta
             )
-            curriculum = make_multiprocessing_curriculum(curriculum, timeout=3000)
-
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
                 sample_env.task_space,
@@ -419,6 +415,30 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 sampling="dist")
+        elif args.curriculum_method == "stratified_learnability":
+            curriculum = StratifiedLearnability(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                sampling="dist")
+        elif args.curriculum_method == "stratified_dr":
+            curriculum = StratifiedDomainRandomization(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+            )
         elif args.curriculum_method == "plr":
             curriculum = CentralPrioritizedLevelReplay(
                 sample_env.task_space,
