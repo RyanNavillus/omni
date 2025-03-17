@@ -134,7 +134,7 @@ def make_task_env(curriculum=None, is_eval=False):
         env = CrafterTaskWrapper(env)
 
         if is_eval:
-            env = GymnasiumEvaluationWrapper(env, change_task_on_completion=True,
+            env = GymnasiumEvaluationWrapper(env, change_task_on_completion=True, start_index_spacing=1,
                                              eval_only_n_tasks=len(env.follow_achievements))
         else:
             env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components,

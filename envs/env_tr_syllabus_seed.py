@@ -32,7 +32,7 @@ class Env(env.Env):
 
     def __init__(
             self, area=(64, 64), view=(9, 9), size=(64, 64),
-            reward=True, length=1500, seed=None, eval_mode=False, dummy_bits=10, static_task="make_wood_pickaxe", num_worlds=100, **kwargs):
+            reward=True, length=300, seed=None, eval_mode=False, dummy_bits=10, static_task="make_wood_pickaxe", num_worlds=100, **kwargs):
         # TODO: Remove Hack
         global DUMMY_BITS, DUMMY_TASKS
         DUMMY_BITS = dummy_bits
