@@ -17,8 +17,9 @@ def init_params(m):
 
 
 class ACModel(nn.Module, torch_ac.RecurrentACModel):
-    def __init__(self, obs_space, action_space, acsize=128, activation='tanh'):
+    def __init__(self, obs_space, action_space, acsize=128, activation='tanh', encode_task=True):
         super().__init__()
+        self.encode_task = encode_task
 
         self.rnn_input_size = 0
 
@@ -46,7 +47,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
             self.rnn_input_size += self.image_embedding_size
 
         # Define taskenc embedding
-        if 'task_enc' in obs_space.keys():
+        if self.encode_task and 'task_enc' in obs_space.keys():
             self.taskenc_extractor = nn.Flatten()
             self.rnn_input_size += np.product(obs_space['task_enc'])
 
@@ -108,7 +109,7 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
             x_image = x_image.reshape(x_image.shape[0], -1)
             x_inputs.append(x_image)
 
-        if 'task_enc' in obs.keys():
+        if self.encode_task and 'task_enc' in obs.keys():
             x_taskenc = obs.task_enc
             x_taskenc = self.taskenc_extractor(x_taskenc)
             x_taskenc = x_taskenc.reshape(x_taskenc.shape[0], -1)

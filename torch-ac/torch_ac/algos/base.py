@@ -9,7 +9,7 @@ class BaseAlgo(ABC):
     """The base class for RL algorithms."""
 
     def __init__(self, envs, acmodel, device, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
-                 value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward):
+                 value_loss_coef, max_grad_norm, recurrence, preprocess_obss, reshape_reward, curriculum):
         """
         Initializes a `BaseAlgo` instance.
 
@@ -59,6 +59,7 @@ class BaseAlgo(ABC):
         self.recurrence = recurrence
         self.preprocess_obss = preprocess_obss or default_preprocess_obss
         self.reshape_reward = reshape_reward
+        self.curriculum = curriculum
 
         # Control parameters
 
@@ -139,6 +140,23 @@ class BaseAlgo(ABC):
             obs, reward, terminated, truncated, info = self.env.step(action.cpu().numpy())
             done = tuple(a | b for a, b in zip(terminated, truncated))
             done_envinfo += [b for a, b in zip(done, info) if a]
+
+            # Syllabus curriculum update
+            if self.curriculum is not None:
+                next_value = None
+                if i == self.num_frames_per_proc - 1:
+                    with torch.no_grad():
+                        preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
+                        mask = 1 - torch.tensor(done, device=self.device, dtype=torch.float)
+                        _, next_value, _ = self.acmodel(preprocessed_obs, self.memory * mask.unsqueeze(1))
+                plr_update = {
+                    "value": value,
+                    "next_value": next_value,
+                    "rew": torch.tensor(reward),
+                    "dones": np.logical_or(terminated, truncated),
+                    "tasks": [self.curriculum.task_space.decode(i["task"]) for i in info],
+                }
+                self.curriculum.update(plr_update)
 
             # Update experiences values
 

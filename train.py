@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization
 from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
@@ -130,7 +130,7 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
 
 def make_task_env(curriculum=None, is_eval=False):
     def thunk():
-        env = env_tr_syllabus.Env(eval_mode=is_eval)
+        env = env_tr_syllabus.Env(eval_mode=is_eval, dummy_bits=args.dummy_bits)
         env = CrafterTaskWrapper(env)
 
         if is_eval:
@@ -222,6 +222,12 @@ if __name__ == "__main__":
                         help="number of times to evaluate each task for learning progress (default: 20)")
     parser.add_argument("--eval-override", type=int, default=0,
                         help="number of episodes to evaluate each task (default: 0)")
+    parser.add_argument("--full-eval", type=bool, default=False,
+                        help="override and force full evaluation")
+    parser.add_argument("--dummy-bits", type=int, default=10,
+                        help="number of dummy bits for impossible tasks")
+    parser.add_argument("--encode-task", type=bool, default=True,
+                        help="encode task in observation")
 
     # Parameters for learning progress
     parser.add_argument("--eval-procs", type=int, default=20,
@@ -260,7 +266,7 @@ if __name__ == "__main__":
 
     # Set run dir
     date = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
-    default_model_name = f"{args.env}_{args.algo}_seed{args.seed}_{date}"
+    default_model_name = f"{args.env}_{args.algo}_{args.exp_name}_seed{args.seed}_{date}"
 
     model_name = args.model or default_model_name
     model_dir = os.path.join(args.logging_dir, utils.get_model_dir(model_name))
@@ -293,7 +299,7 @@ if __name__ == "__main__":
         }
     txt_logger.info("Training status loaded\n")
 
-    sample_env = env_tr_uni.Env()
+    sample_env = env_tr_uni.Env(dummy_bits=args.dummy_bits)
     sample_env.reset()
     task_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
 
@@ -303,7 +309,7 @@ if __name__ == "__main__":
 
     # Load model
     acmodel = ACModel(obs_space, sample_env.action_space,
-                      acsize=args.ac_size, activation=args.activation)
+                      acsize=args.ac_size, activation=args.activation, encode_task=args.encode_task)
     print(sum(p.numel() for p in acmodel.parameters() if p.requires_grad))
 
     if "model_state" in status:
@@ -320,7 +326,7 @@ if __name__ == "__main__":
 
     # Eval envs
     env_module = importlib.import_module(f'envs.env_{args.env}')
-    eval_envs = [env_tr_uni.Env() for _ in range(args.eval_procs)]
+    eval_envs = [env_tr_uni.Env(dummy_bits=args.dummy_bits) for _ in range(args.eval_procs)]
     eval_envs = ParallelEnv(eval_envs)
     eval_envs.reset()
     eval_envs.set_curriculum(train=False)
@@ -328,19 +334,23 @@ if __name__ == "__main__":
 
     # Create curriculum
     if args.syllabus:
-        sample_env = env_tr_syllabus_seed.Env() if args.seed_curriculum else env_tr_syllabus.Env()
+        sample_env = env_tr_syllabus_seed.Env(dummy_bits=args.dummy_bits) if args.seed_curriculum else env_tr_syllabus.Env(dummy_bits=args.dummy_bits)
         sample_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
         syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
         names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
+        print(sample_env.task_space.num_tasks)
+        # print(sample_env.task_space.decode(105))
 
         def task_names(task, idx):
             return names[idx]
 
         # curriculum = LearningProgress(
         interestingness = interestingness_from_json('./moi_saved/preds_r.json')
-        if args.curriculum_method == "learning_progress":
+        if args.curriculum_method == "dr":
+            curriculum = DomainRandomization(sample_env.task_space)
+        elif args.curriculum_method == "learning_progress":
             curriculum = LearningProgress(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
@@ -372,7 +382,8 @@ if __name__ == "__main__":
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
@@ -460,7 +471,7 @@ if __name__ == "__main__":
         if args.syllabus:
             envs.append(make_env(curriculum=curriculum)())
         else:
-            envs.append(env_module.Env())
+            envs.append(env_module.Env(dummy_bits=args.dummy_bits))
     txt_logger.info("Environments loaded\n")
 
     # Load algo
@@ -483,7 +494,7 @@ if __name__ == "__main__":
     num_frames = status["num_frames"]
     update = status["update"]
     start_time = time.time()
-    should_eval = not args.syllabus or (args.syllabus and args.curriculum_method == "plr")
+    should_eval = not args.syllabus or (args.syllabus and args.curriculum_method == "plr") or args.full_eval
     print(should_eval)
     if args.eval_interval > 0 and should_eval:
         print("Initial Evaluating")
