@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization
+from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization, SequentialCurriculum
 from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
@@ -151,7 +151,7 @@ def make_seed_env(curriculum=None, is_eval=False):
         if is_eval:
             env = GymnasiumEvaluationWrapper(env, ignore_seed=True)
         else:
-            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components, buffer_size=2)
+            env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components, buffer_size=0)
         return env
     return thunk
 
@@ -226,7 +226,7 @@ if __name__ == "__main__":
                         help="override and force full evaluation")
     parser.add_argument("--dummy-bits", type=int, default=10,
                         help="number of dummy bits for impossible tasks")
-    parser.add_argument("--encode-task", type=bool, default=True,
+    parser.add_argument("--no-encode-task", default=True, action="store_true",
                         help="encode task in observation")
 
     # Parameters for learning progress
@@ -250,6 +250,7 @@ if __name__ == "__main__":
                         help="staleness coefficient for PLR sampling (default: 0.1)")
     args = parser.parse_args()
     args.recurrence = 2
+    args.encode_task = not args.no_encode_task
 
     run_name = f"{args.env}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
@@ -334,7 +335,8 @@ if __name__ == "__main__":
 
     # Create curriculum
     if args.syllabus:
-        sample_env = env_tr_syllabus_seed.Env(dummy_bits=args.dummy_bits) if args.seed_curriculum else env_tr_syllabus.Env(dummy_bits=args.dummy_bits)
+        sample_env = env_tr_syllabus_seed.Env(
+            dummy_bits=args.dummy_bits) if args.seed_curriculum else env_tr_syllabus.Env(dummy_bits=args.dummy_bits)
         sample_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
@@ -460,6 +462,13 @@ if __name__ == "__main__":
                 task_sampler_kwargs_dict={"strategy": "value_l1",
                                           "staleness_coef": args.plr_staleness_coef,
                                           "temperature": args.plr_temperature},
+            )
+        elif args.curriculum_method == "sequential":
+            curriculum = SequentialCurriculum(
+                [["collect_drink", "collect_wood"], ["place_table", "make_wood_pickaxe"], ["make_wood_pickaxe", "collect_stone", "place_table"], [
+                    "collect_stone", "place_table", "make_stone_pickaxe", "place_furnace"], ["make_stone_pickaxe", "collect_iron", "place_furnace", "collect_coal"], ["collect_iron", "collect_coal", "place_furnace", "make_iron_pickaxe"], ["make_iron_pickaxe", "collect_diamond"]],
+                ["steps>=65536", "steps>=65536", "steps>=98304", "steps>=524288", "steps>=524288", "steps>=524288"],
+                sample_env.task_space,
             )
         else:
             raise ValueError("Invalid curriculum method")
@@ -619,7 +628,7 @@ if __name__ == "__main__":
                 tb_writer.add_scalar(field, value, num_frames)
 
             if args.syllabus:
-                curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=5)
+                curriculum.log_metrics(tb_writer, None, num_frames, log_n_tasks=15)
 
         # Save status
         if args.save_interval > 0 and update % args.save_interval == 0 and not args.syllabus:
