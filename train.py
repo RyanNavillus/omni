@@ -236,6 +236,8 @@ if __name__ == "__main__":
                         help="smoothing value for ema in claculating learning progress (default: 0.1)")
     parser.add_argument("--p-theta", type=float, default=0.1,
                         help="parameter for reweighing learning progress (default: 0.1)")
+    parser.add_argument("--online_uniform_prob", type=float, default=0.25,
+                        help="probability of sampling uniformly from the task space in online learning progress (default: 0.25)")
 
     # Learnability arguments
     parser.add_argument("--learnability-prob", type=float, default=1.0,
@@ -369,16 +371,11 @@ if __name__ == "__main__":
         elif args.curriculum_method == "online_learning_progress":
             curriculum = OnlineLearningProgress(
                 sample_env.task_space,
-                eval_envs=syllabus_eval_envs,
-                evaluator=evaluator,
                 eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
-                recurrent_size=acmodel.memory_size,
-                recurrent_method="rnn",
                 task_names=task_names,
-                eval_eps=eval_eps,
-                baseline_eval_eps=eval_eps,
                 ema_alpha=args.ema_alpha,
-                p_theta=args.p_theta
+                p_theta=args.p_theta,
+                uniform_prob=args.online_uniform_prob,
             )
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
