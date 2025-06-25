@@ -226,7 +226,7 @@ if __name__ == "__main__":
                         help="override and force full evaluation")
     parser.add_argument("--dummy-bits", type=int, default=10,
                         help="number of dummy bits for impossible tasks")
-    parser.add_argument("--no-encode-task", default=True, action="store_true",
+    parser.add_argument("--no-encode-task", action="store_true", default=True,
                         help="encode task in observation")
 
     # Parameters for learning progress
