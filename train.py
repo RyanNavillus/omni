@@ -226,7 +226,7 @@ if __name__ == "__main__":
                         help="override and force full evaluation")
     parser.add_argument("--dummy-bits", type=int, default=10,
                         help="number of dummy bits for impossible tasks")
-    parser.add_argument("--encode-task", type=bool, default=True,
+    parser.add_argument("--no-encode-task", action="store_true", default=True,
                         help="encode task in observation")
 
     # Parameters for learning progress
@@ -250,6 +250,7 @@ if __name__ == "__main__":
                         help="staleness coefficient for PLR sampling (default: 0.1)")
     args = parser.parse_args()
     args.recurrence = 2
+    args.encode_task = not args.no_encode_task
 
     run_name = f"{args.env}__{args.exp_name}__{args.seed}__{int(time.time())}"
 
