@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization, SequentialCurriculum
+from syllabus.curricula import LearningProgress, OnlineLearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization, SequentialCurriculum
 from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
@@ -354,6 +354,20 @@ if __name__ == "__main__":
             curriculum = DomainRandomization(sample_env.task_space)
         elif args.curriculum_method == "learning_progress":
             curriculum = LearningProgress(
+                sample_env.task_space,
+                eval_envs=syllabus_eval_envs,
+                evaluator=evaluator,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                recurrent_size=acmodel.memory_size,
+                recurrent_method="rnn",
+                task_names=task_names,
+                eval_eps=eval_eps,
+                baseline_eval_eps=eval_eps,
+                ema_alpha=args.ema_alpha,
+                p_theta=args.p_theta
+            )
+        elif args.curriculum_method == "online_learning_progress":
+            curriculum = OnlineLearningProgress(
                 sample_env.task_space,
                 eval_envs=syllabus_eval_envs,
                 evaluator=evaluator,
