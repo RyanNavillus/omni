@@ -236,7 +236,7 @@ if __name__ == "__main__":
                         help="smoothing value for ema in claculating learning progress (default: 0.1)")
     parser.add_argument("--p-theta", type=float, default=0.1,
                         help="parameter for reweighing learning progress (default: 0.1)")
-    parser.add_argument("--online_uniform_prob", type=float, default=0.25,
+    parser.add_argument("--online-uniform-prob", type=float, default=0.25,
                         help="probability of sampling uniformly from the task space in online learning progress (default: 0.25)")
 
     # Learnability arguments
