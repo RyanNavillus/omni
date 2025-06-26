@@ -238,6 +238,8 @@ if __name__ == "__main__":
                         help="parameter for reweighing learning progress (default: 0.1)")
     parser.add_argument("--online-uniform-prob", type=float, default=0.25,
                         help="probability of sampling uniformly from the task space in online learning progress (default: 0.25)")
+    parser.add_argument("--online-save-last", type=bool, default=False,
+                        help="whether to save the last success rates in online learning progress (default: False)")
 
     # Learnability arguments
     parser.add_argument("--learnability-prob", type=float, default=1.0,
