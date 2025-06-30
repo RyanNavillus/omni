@@ -226,7 +226,7 @@ if __name__ == "__main__":
                         help="override and force full evaluation")
     parser.add_argument("--dummy-bits", type=int, default=10,
                         help="number of dummy bits for impossible tasks")
-    parser.add_argument("--no-encode-task", action="store_true", default=True,
+    parser.add_argument("--no-encode-task", action="store_true", default=False,
                         help="encode task in observation")
 
     # Parameters for learning progress
@@ -240,6 +240,8 @@ if __name__ == "__main__":
                         help="probability of sampling uniformly from the task space in online learning progress (default: 0.25)")
     parser.add_argument("--online-save-last", type=bool, default=False,
                         help="whether to save the last success rates in online learning progress (default: False)")
+    parser.add_argument("--normalize-success", type=bool, default=True,
+                        help="whether to normalize success rates in learning progress (default: True)")
 
     # Learnability arguments
     parser.add_argument("--learnability-prob", type=float, default=1.0,
@@ -368,7 +370,8 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 ema_alpha=args.ema_alpha,
-                p_theta=args.p_theta
+                p_theta=args.p_theta,
+                normalize_success=args.normalize_success,
             )
         elif args.curriculum_method == "online_learning_progress":
             curriculum = OnlineLearningProgress(
@@ -378,6 +381,7 @@ if __name__ == "__main__":
                 ema_alpha=args.ema_alpha,
                 p_theta=args.p_theta,
                 uniform_prob=args.online_uniform_prob,
+                normalize_success=args.normalize_success,
             )
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
