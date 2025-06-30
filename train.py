@@ -393,7 +393,9 @@ if __name__ == "__main__":
                 recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
-                baseline_eval_eps=eval_eps)
+                baseline_eval_eps=eval_eps,
+                normalize_success=args.normalize_success,
+            )
         elif args.curriculum_method == "stratified_online_learning_progress":
             curriculum = StratifiedOnlineLearningProgress(
                 sample_env.task_space,
@@ -402,6 +404,7 @@ if __name__ == "__main__":
                 ema_alpha=args.ema_alpha,
                 p_theta=args.p_theta,
                 uniform_prob=args.online_uniform_prob,
+                normalize_success=args.normalize_success,
             )
         elif args.curriculum_method == "omni":
             curriculum = OMNI(
