@@ -13,7 +13,7 @@ import torch
 import torch_ac
 from gymnasium.vector import AsyncVectorEnv, SyncVectorEnv
 from syllabus.core import GymnasiumSyncWrapper, make_multiprocessing_curriculum, Evaluator, GymnasiumEvaluationWrapper
-from syllabus.curricula import LearningProgress, OnlineLearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization, SequentialCurriculum
+from syllabus.curricula import LearningProgress, OnlineLearningProgress, OMNI, interestingness_from_json, StratifiedLearningProgress, StratifiedOnlineLearningProgress, Learnability, OMNILearnability, CentralPrioritizedLevelReplay, StratifiedDomainRandomization, StratifiedLearnability, DomainRandomization, SequentialCurriculum
 from syllabus.task_space import DiscreteTaskSpace
 from torch_ac.utils import ParallelEnv
 
@@ -394,6 +394,15 @@ if __name__ == "__main__":
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps)
+        elif args.curriculum_method == "stratified_online_learning_progress":
+            curriculum = StratifiedOnlineLearningProgress(
+                sample_env.task_space,
+                eval_interval_steps=args.eval_interval * args.frames_per_proc * args.procs,
+                task_names=task_names,
+                ema_alpha=args.ema_alpha,
+                p_theta=args.p_theta,
+                uniform_prob=args.online_uniform_prob,
+            )
         elif args.curriculum_method == "omni":
             curriculum = OMNI(
                 sample_env.task_space,

@@ -8,33 +8,34 @@ class CrafterTaskWrapper(TaskWrapper):
     def __init__(self, env):
         super().__init__(env)
         self.env = env
-        self.task_space = DiscreteTaskSpace(len(self.env.given_achievements), list(self.env.given_achievements.keys()))
 
-        # strata = []
-        # strata_idx = []
-        # stratum = []
-        # stratum_idx = []
-        # for idx, task in enumerate(self.env.given_achievements.keys()):
-        #     if len(stratum) == 0:
-        #         stratum.append(task)
-        #         stratum_idx.append(idx)
-        #     else:
-        #         if task.startswith(stratum[0]):
-        #             stratum.append(task)
-        #             stratum_idx.append(idx)
-        #         else:
-        #             strata.append(stratum)
-        #             strata_idx.append(stratum_idx)
-        #             stratum = [task]
-        #             stratum_idx = [idx]
-        # strata.append(stratum)
-        # strata_idx.append(stratum_idx)
+        strata = []
+        strata_idx = []
+        stratum = []
+        stratum_idx = []
+        for idx, task in enumerate(self.env.given_achievements.keys()):
+            if len(stratum) == 0:
+                stratum.append(task)
+                stratum_idx.append(idx)
+            else:
+                if task.startswith(stratum[0]):
+                    stratum.append(task)
+                    stratum_idx.append(idx)
+                else:
+                    strata.append(stratum)
+                    strata_idx.append(stratum_idx)
+                    stratum = [task]
+                    stratum_idx = [idx]
+        strata.append(stratum)
+        strata_idx.append(stratum_idx)
 
-        # self.task_space = StratifiedDiscreteTaskSpace(strata_idx, strata)
+        self.task_space = StratifiedDiscreteTaskSpace(strata_idx, strata)
         # self.task_space = DiscreteTaskSpace(
         #     6, ["collect_wood", "collect_stone", "make_stone_pickaxe",
         #         "collect_iron", "make_iron_pickaxe", "collect_diamond"]
         # )
+        # self.task_space = DiscreteTaskSpace(len(self.env.given_achievements), list(self.env.given_achievements.keys()))
+
         self.task = self.task_space.decode(self.env.task_idx)
 
     def reset(self, *args, **kwargs):
