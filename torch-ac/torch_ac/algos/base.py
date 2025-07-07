@@ -3,7 +3,7 @@ import torch
 
 from torch_ac.format import default_preprocess_obss
 from torch_ac.utils import DictList, ParallelEnv
-
+import numpy as np
 
 class BaseAlgo(ABC):
     """The base class for RL algorithms."""

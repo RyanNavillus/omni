@@ -505,6 +505,7 @@ if __name__ == "__main__":
         elif args.curriculum_method == "plr":
             curriculum = CentralPrioritizedLevelReplay(
                 sample_env.task_space,
+                task_names=task_names,
                 num_steps=args.frames_per_proc,
                 num_processes=args.procs,
                 gamma=args.discount,
@@ -541,7 +542,7 @@ if __name__ == "__main__":
     elif args.algo == "ppo":
         algo = torch_ac.PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.gae_lambda,
                                 args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum if isinstance(curriculum, CentralPrioritizedLevelReplay) else None)
+                                args.optim_eps, args.clip_eps, args.epochs, args.batch_size, preprocess_obss, curriculum=curriculum if isinstance(curriculum.curriculum, CentralPrioritizedLevelReplay) else None)
     else:
         raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 

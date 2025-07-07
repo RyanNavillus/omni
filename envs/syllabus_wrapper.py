@@ -38,7 +38,7 @@ class CrafterTaskWrapper(TaskWrapper):
 
         self.full_task_space = DiscreteTaskSpace(len(self.env.given_achievements), list(self.env.given_achievements.keys()))
 
-        self.task = self.task_space.decode(self.env.task_idx)
+        self.task = self.task_space.decode(np.random.randint(0, self.task_space.num_tasks))
 
     def reset(self, *args, **kwargs):
         new_task = kwargs.pop("new_task", None)
