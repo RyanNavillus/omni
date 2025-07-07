@@ -17,9 +17,10 @@ def init_params(m):
 
 
 class ACModel(nn.Module, torch_ac.RecurrentACModel):
-    def __init__(self, obs_space, action_space, acsize=128, activation='tanh', encode_task=True):
+    def __init__(self, obs_space, action_space, acsize=128, activation='tanh', encode_task=True, task_dropout=0.0):
         super().__init__()
         self.encode_task = encode_task
+        self.task_dropout = task_dropout
 
         self.rnn_input_size = 0
 
@@ -112,6 +113,11 @@ class ACModel(nn.Module, torch_ac.RecurrentACModel):
         if self.encode_task and 'task_enc' in obs.keys():
             x_taskenc = obs.task_enc
             x_taskenc = self.taskenc_extractor(x_taskenc)
+
+            # Randomly drop task encodings during training
+            if self.training and torch.rand(1).item() < self.task_dropout:
+                x_taskenc = torch.ones_like(obs.task_enc)
+
             x_taskenc = x_taskenc.reshape(x_taskenc.shape[0], -1)
             x_inputs.append(x_taskenc)
 

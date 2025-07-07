@@ -131,11 +131,11 @@ def eval_all_tasks(acmodel, penv, num_eps=1, wrap=False):
 def make_task_env(curriculum=None, is_eval=False):
     def thunk():
         env = env_tr_syllabus.Env(eval_mode=is_eval, dummy_bits=args.dummy_bits)
-        env = CrafterTaskWrapper(env)
+        env = CrafterTaskWrapper(env, simple_task_space=args.simple_task_space)
 
         if is_eval:
             env = GymnasiumEvaluationWrapper(env, change_task_on_completion=True, start_index_spacing=1,
-                                             eval_only_n_tasks=len(env.follow_achievements))
+                                             eval_only_n_tasks=env.task_space.num_tasks)
         else:
             env = GymnasiumSyncWrapper(env, env.task_space, curriculum.components,
                                        buffer_size=1, change_task_on_completion=True)
@@ -228,6 +228,10 @@ if __name__ == "__main__":
                         help="number of dummy bits for impossible tasks")
     parser.add_argument("--no-encode-task", action="store_true", default=False,
                         help="encode task in observation")
+    parser.add_argument("--task-dropout", type=float, default=0.0,
+                        help="probability of dropping task encodings during training (default: 0.0)")
+    parser.add_argument("--simple-task-space", type=bool, default=False,
+                        help="use a simple task space with only the base achievements (default: False)")
 
     # Parameters for learning progress
     parser.add_argument("--eval-procs", type=int, default=20,
@@ -236,12 +240,14 @@ if __name__ == "__main__":
                         help="smoothing value for ema in claculating learning progress (default: 0.1)")
     parser.add_argument("--p-theta", type=float, default=0.1,
                         help="parameter for reweighing learning progress (default: 0.1)")
-    parser.add_argument("--online-uniform-prob", type=float, default=0.25,
-                        help="probability of sampling uniformly from the task space in online learning progress (default: 0.25)")
+    parser.add_argument("--online-uniform-prob", type=float, default=0.0,
+                        help="probability of sampling uniformly from the task space in online learning progress (default: 0.0)")
     parser.add_argument("--online-save-last", type=bool, default=False,
                         help="whether to save the last success rates in online learning progress (default: False)")
     parser.add_argument("--normalize-success", type=bool, default=True,
                         help="whether to normalize success rates in learning progress (default: True)")
+    parser.add_argument("--selection_metric", type=str, default="success",
+                        help="metric to use for selection in learning progress (default: success, options: success, score, learnability)")
 
     # Learnability arguments
     parser.add_argument("--learnability-prob", type=float, default=1.0,
@@ -308,7 +314,7 @@ if __name__ == "__main__":
 
     sample_env = env_tr_uni.Env(dummy_bits=args.dummy_bits)
     sample_env.reset()
-    task_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
+    task_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env, simple_task_space=args.simple_task_space)
 
     # Load observations preprocessor
     obs_space, preprocess_obss = utils.get_obss_preprocessor(sample_env.observation_space)
@@ -316,7 +322,7 @@ if __name__ == "__main__":
 
     # Load model
     acmodel = ACModel(obs_space, sample_env.action_space,
-                      acsize=args.ac_size, activation=args.activation, encode_task=args.encode_task)
+                      acsize=args.ac_size, activation=args.activation, encode_task=args.encode_task, task_dropout=args.task_dropout)
     print(sum(p.numel() for p in acmodel.parameters() if p.requires_grad))
 
     if "model_state" in status:
@@ -343,11 +349,11 @@ if __name__ == "__main__":
     if args.syllabus:
         sample_env = env_tr_syllabus_seed.Env(
             dummy_bits=args.dummy_bits) if args.seed_curriculum else env_tr_syllabus.Env(dummy_bits=args.dummy_bits)
-        sample_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env)
+        sample_env = CrafterSeedWrapper(sample_env) if args.seed_curriculum else CrafterTaskWrapper(sample_env, simple_task_space=args.simple_task_space)
         sample_env.reset()
         evaluator = ACEvaluator(acmodel, preprocess_obs=preprocessor, device=device)
         syllabus_eval_envs = AsyncVectorEnv([make_env(is_eval=True) for _ in range(args.eval_procs)])
-        names = [f'{ach_to_string(ach)}' for ach in sample_env.given_achievements]
+        names = [f'{name}' for name in sample_env.task_space.tasks]
         print(sample_env.task_space.num_tasks)
         # print(sample_env.task_space.decode(105))
 
@@ -357,7 +363,10 @@ if __name__ == "__main__":
         # curriculum = LearningProgress(
         interestingness = interestingness_from_json('./moi_saved/preds_r.json')
         if args.curriculum_method == "dr":
-            curriculum = DomainRandomization(sample_env.task_space)
+            curriculum = DomainRandomization(
+                sample_env.task_space,
+                task_names=task_names,
+            )
         elif args.curriculum_method == "learning_progress":
             curriculum = LearningProgress(
                 sample_env.task_space,
@@ -382,6 +391,8 @@ if __name__ == "__main__":
                 p_theta=args.p_theta,
                 uniform_prob=args.online_uniform_prob,
                 normalize_success=args.normalize_success,
+                random_start_tasks=500,
+                use_live_dist=True,
             )
         elif args.curriculum_method == "stratified_learning_progress":
             curriculum = StratifiedLearningProgress(
@@ -395,6 +406,7 @@ if __name__ == "__main__":
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
                 normalize_success=args.normalize_success,
+                selection_metric=args.selection_metric,
             )
         elif args.curriculum_method == "stratified_online_learning_progress":
             curriculum = StratifiedOnlineLearningProgress(
@@ -405,6 +417,9 @@ if __name__ == "__main__":
                 p_theta=args.p_theta,
                 uniform_prob=args.online_uniform_prob,
                 normalize_success=args.normalize_success,
+                random_start_tasks=500,
+                use_live_dist=True,
+                selection_metric=args.selection_metric,
             )
         elif args.curriculum_method == "omni":
             curriculum = OMNI(
@@ -417,7 +432,9 @@ if __name__ == "__main__":
                 recurrent_method="rnn",
                 task_names=task_names,
                 eval_eps=eval_eps,
-                baseline_eval_eps=eval_eps)
+                baseline_eval_eps=eval_eps,
+                normalize_success=args.normalize_success,
+            )
         elif args.curriculum_method == "learnability":
             curriculum = Learnability(
                 sample_env.task_space,
@@ -429,7 +446,8 @@ if __name__ == "__main__":
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
-                sampling="dist")
+                sampling="dist",
+                normalize_success=args.normalize_success)
         elif args.curriculum_method == "learnability_topk":
             curriculum = Learnability(
                 sample_env.task_space,
@@ -468,7 +486,10 @@ if __name__ == "__main__":
                 task_names=task_names,
                 eval_eps=eval_eps,
                 baseline_eval_eps=eval_eps,
-                sampling="dist")
+                sampling="dist",
+                normalize_success=args.normalize_success,
+                selection_metric=args.selection_metric
+            )
         elif args.curriculum_method == "stratified_dr":
             curriculum = StratifiedDomainRandomization(
                 sample_env.task_space,
